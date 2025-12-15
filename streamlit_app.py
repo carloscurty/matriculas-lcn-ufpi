@@ -8,7 +8,7 @@ st.write(
 )
 
 
-df = pd.read_csv("https://drive.google.com/uc?export=download&id=1_urzrUF2XmxmoAkcGmNvY0OG-Y5csMmk")
+df = pd.read_csv("https://drive.google.com/uc?export=download&id=1_urzrUF2XmxmoAkcGmNvY0OG-Y5csMmk", encoding='cp1252', sep=';')
 
 # Group by 'Turno' and 'Período' and count unique 'Matrícula'
 enrollment_by_shift_period = df.groupby(['Turno', 'Período'])['Matrícula'].nunique().reset_index()
