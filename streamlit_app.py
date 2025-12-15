@@ -1,5 +1,5 @@
 import streamlit as st
-import plotly.express as px
+import plotly.express as px # type: ignore
 import pandas as pd
 
 st.title("🎈 Matriculas - LCN UFPI]")
