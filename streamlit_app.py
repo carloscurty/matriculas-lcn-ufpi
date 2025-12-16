@@ -2,11 +2,21 @@ import streamlit as st
 import plotly.express as px # type: ignore
 import pandas as pd
 
+# Alterar cor de fundo da tela
+st.markdown("""
+<style>
+.stApp {
+    background-color: #010101;
+}
+</style>
+""", unsafe_allow_html=True)
+
 df = pd.read_csv("https://drive.google.com/uc?export=download&id=1_urzrUF2XmxmoAkcGmNvY0OG-Y5csMmk", encoding='cp1252', sep=';')
 
 # Menu lateral para filtrar por aluno
 with st.sidebar:
-    st.sidebar.title("Matrículas - Ciências da Natureza/UFPI")
+    st.sidebar.title("Ciências da Natureza/UFPI")
+    st.sidebar.subheader("Matrículas")
     alunos = ['Todos'] + sorted(df['Nome'].dropna().unique().tolist())
     aluno_selecionado = st.selectbox("Selecione um aluno", alunos)
 
@@ -44,7 +54,7 @@ if aluno_selecionado == 'Todos':
     for i, turno in enumerate(turnos):
         with cols1[i]:
             st.markdown(f"""
-<div style="background-color: #f5f5f5; padding: 15px; border-radius: 8px; text-align: center;">
+<div style="background-color: #112333; padding: 15px; border: #000000; border-radius: 8px; text-align: center;">
     <h5>{turno}</h5>
     <h3>{total_por_turno[turno]}</h3>
 </div>
@@ -56,7 +66,7 @@ if aluno_selecionado == 'Todos':
     for i, turno in enumerate(turnos):
         with cols2[i]:
             st.markdown(f"""
-<div style="background-color: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center;">
+<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
     <h5>{turno}</h5>
     <h3>{media_por_turno[turno]:.0f}</h3>
 </div>
@@ -68,7 +78,7 @@ if aluno_selecionado == 'Todos':
     for i, turno in enumerate(turnos):
         with cols3[i]:
             st.markdown(f"""
-<div style="background-color: 'yellow'; padding: 15px; border-radius: 8px; text-align: center;">
+<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
     <h5>{turno}</h5>
     <h3>{totgeral_por_turno[turno]}</h3>
 </div>
@@ -79,27 +89,49 @@ else:
     for i, turno in enumerate(turnos):
         with cols[i]:
             st.markdown(f"""
-<div style="background-color: #f5f5f5; padding: 15px; border-radius: 8px; text-align: center;">
-    <h5>{turno}</h5>
-    <h3>{total_por_turno[turno]}</h3>
-    <p>Média: {media_por_turno[turno]:.0f}</p>
-    <p>Total: {totgeral_por_turno[turno]}</p>
+<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
+    <h5>{turno}: {totgeral_por_turno[turno]} matrículas</h5>
 </div>
 """, unsafe_allow_html=True)
 
+st.markdown("---")            
+
+print("aaa")
+
 # Novos cards sugeridos
-st.subheader("Métricas Acadêmicas")
-aprovados_por_turno = (df[df['AP'] > 0].groupby('Turno')['Matrícula'].nunique() / df.groupby('Turno')['Matrícula'].nunique() * 100).fillna(0)
+st.subheader("Nível de Aprovação por Turno")
+aprovados_por_turno = (df.groupby('Turno')['AP'].sum() / df.groupby('Turno')['Total'].sum() * 100).fillna(0)
 cols_novos = st.columns(len(turnos))
 for i, turno in enumerate(turnos):
     with cols_novos[i]:
-        st.metric(f"Aprovados (%) - {turno}", f"{aprovados_por_turno.get(turno, 0):.1f}%")
+            st.markdown(f"""
+<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
+    <h5>{turno}</h5>
+    <h3> {aprovados_por_turno.get(turno, 0):.1f}%</h3>
+</div>
+""", unsafe_allow_html=True)
+
+#st.metric(f"{turno}", f"{aprovados_por_turno.get(turno, 0):.1f}%")
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # Tabela de Top Alunos
-st.subheader("Top 10 Alunos por Disciplinas Aprovadas")
-top_alunos = df.nlargest(10, 'AP')[['Nome', 'Turno', 'Período', 'AP']].reset_index(drop=True)
+st.subheader("Melhores Alunos por Quantidade de Aprovações")
+
+df_top10 = df.groupby('Nome').agg({
+    'Ingresso': 'first',
+    'Turno': 'first',
+    'AP': 'sum',
+    'RP': 'sum',
+    'TR': 'sum',
+    'Total': 'sum'
+}).reset_index()
+df_top10['% Aprov'] = (df_top10['AP'] / df_top10['Total'] * 100).fillna(0).round(0)
+top_alunos = df_top10.nlargest(10, '% Aprov')[['Nome', 'Turno', 'AP', '% Aprov', 'Total']].reset_index(drop=True)
+top_alunos = top_alunos.sort_values(by=['% Aprov', 'Total'], ascending=[False, False])
 st.dataframe(top_alunos, hide_index=True)
 
+st.markdown("---")   
 
 # Group by 'Turno' and 'Período' and count unique 'Matrícula'
 enrollment_by_shift_period = df.groupby(['Turno', 'Período'])['Matrícula'].nunique().reset_index()
@@ -160,7 +192,9 @@ fig_bar_status = px.bar(status_melted, x='Período', y='Count', color='Status', 
 fig_bar_status.update_xaxes(type='category')
 st.plotly_chart(fig_bar_status)
 
-st.subheader("Matrículas")
+st.markdown("---")
 
-df_compactado = df[['Matrícula', 'Nome', 'Período', 'Turno']].drop_duplicates().reset_index(drop=True)
+st.subheader("Relação de Alunos")
+
+df_compactado = df_top10.sort_values(by=['Nome', 'Ingresso'], ascending=[True, True])
 st.dataframe(df_compactado, hide_index=True)
