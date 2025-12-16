@@ -9,7 +9,15 @@ st.write(
 
 
 df = pd.read_csv("https://drive.google.com/uc?export=download&id=1_urzrUF2XmxmoAkcGmNvY0OG-Y5csMmk", encoding='cp1252', sep=';')
-df
+
+# Menu lateral para filtrar por aluno
+with st.sidebar:
+    alunos = ['Todos'] + sorted(df['Nome'].dropna().unique().tolist())
+    aluno_selecionado = st.selectbox("Selecione um aluno", alunos)
+
+# Filtrar DataFrame se um aluno específico for selecionado
+if aluno_selecionado != 'Todos':
+    df = df[df['Nome'] == aluno_selecionado]
 
 # Group by 'Turno' and 'Período' and count unique 'Matrícula'
 enrollment_by_shift_period = df.groupby(['Turno', 'Período'])['Matrícula'].nunique().reset_index()
