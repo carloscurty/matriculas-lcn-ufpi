@@ -1,200 +1,295 @@
 import streamlit as st
-import plotly.express as px # type: ignore
+import plotly.express as px
 import pandas as pd
+from datetime import datetime
 
-# Alterar cor de fundo da tela
+# 1. Configuração da Página (Deve ser o primeiro comando Streamlit)
+st.set_page_config(
+    page_title="Dashboard Acadêmico",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 2. Estilos CSS globais
 st.markdown("""
 <style>
-.stApp {
-    background-color: #010101;
-}
+    .stApp {
+        background-color: rgba(0,0,0,0.05);
+    }
+    /* Ajuste para remover padding extra do topo */
+    .block-container {
+        padding-top: 2rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-df = pd.read_csv("https://drive.google.com/uc?export=download&id=1_urzrUF2XmxmoAkcGmNvY0OG-Y5csMmk", encoding='cp1252', sep=';')
+# Marcador para o botão 'Voltar ao Topo'
+st.markdown("<span id='topo'></span>", unsafe_allow_html=True)
 
-# Menu lateral para filtrar por aluno
+# 3. Função de Carregamento com Cache (Melhora drástica de performance)
+@st.cache_data
+def carregar_dados():
+    url = "https://drive.google.com/uc?export=download&id=1_urzrUF2XmxmoAkcGmNvY0OG-Y5csMmk"
+    df = pd.read_csv(url, encoding='cp1252', sep=';')
+    
+    # Tratamento inicial de dados
+    # Converter Período para datetime apenas uma vez
+    if 'Período' in df.columns:
+        df['Período_dt'] = pd.to_datetime(df['Período'], errors='coerce')
+        df['Período_str'] = df['Período_dt'].dt.strftime('%Y-%m')
+    
+    return df
+
+# 4. Função auxiliar para gerar o HTML dos Cards (Evita repetição de código)
+def exibir_card(titulo, valor, prefixo="", sufixo=""):
+    return f"""
+    <div style="
+        padding: 15px; 
+        border: 1px solid #112333; 
+        background-color: #f0f0f0; 
+        border-radius: 8px; 
+        text-align: center;
+        box-shadow: 3px 3px 5px rgba(0, 0, 0, 0.3);
+        margin-bottom: 10px;">
+        <h5 style="margin:0; font-size: 1rem; color: #333;">{titulo}</h5>
+        <h3 style="margin:0; font-size: 1.5rem; font-weight: bold;">{prefixo}{valor}{sufixo}</h3>
+    </div>
+    """
+
+# 5. Função para colorir tabela (Sem dependência de Matplotlib)
+def cor_condicional(valor, cor_hex):
+    if isinstance(valor, (int, float)) and valor > 0:
+        return f'background-color: {cor_hex}'
+    return ''
+
+# --- INÍCIO DO APP ---
+
+try:
+    df = carregar_dados()
+except Exception as e:
+    st.error(f"Erro ao carregar dados: {e}")
+    st.stop()
+
+# --- SIDEBAR ---
 with st.sidebar:
-    st.sidebar.title("Ciências da Natureza/UFPI")
-    st.sidebar.subheader("Matrículas")
+    st.title("Ciências da Natureza/UFPI")
+    
+    # Filtros
+    st.subheader("Filtros")
     alunos = ['Todos'] + sorted(df['Nome'].dropna().unique().tolist())
     aluno_selecionado = st.selectbox("Selecione um aluno", alunos)
 
     periodos = sorted(df['Período'].dropna().unique().tolist())
     periodo_selecionado = st.multiselect("Selecione períodos", periodos, default=periodos)
 
-    turnos = sorted(df['Turno'].dropna().unique().tolist())
-    turno_selecionado = st.multiselect("Selecione turnos", turnos, default=turnos)
+    # Navegação
+    st.markdown("""
+        <h1 style='font-size: 18px; margin-bottom: 5px; padding-bottom: 0;'>Navegação</h1>
+        <hr style='margin-top: 2px; margin-bottom: 20px; border: 1px solid #ccc;'>
+    """, unsafe_allow_html=True)
+    
+    estilo_link = "font-size: 14px; text-decoration: none; color: inherit; display: block; margin-bottom: 10px;"
+    st.markdown(f"""
+        <a href="#total-de-alunos" style="{estilo_link}">📝 Métricas Gerais</a>
+        <a href="#melhores-alunos" style="{estilo_link}">✅ Aprovações (Top 10)</a>
+        <a href="#graficos" style="{estilo_link}">📊 Gráficos</a>
+        <a href="#relacao-geral-de-alunos" style="{estilo_link}">👥 Relação Geral</a>
+    """, unsafe_allow_html=True)
 
-# Filtrar DataFrame se um aluno específico for selecionado
+# Aplicação dos Filtros
+df_filtrado = df.copy()
+
 if aluno_selecionado != 'Todos':
-    df = df[df['Nome'] == aluno_selecionado]
+    df_filtrado = df_filtrado[df_filtrado['Nome'] == aluno_selecionado]
 
-# Filtrar por períodos selecionados
 if periodo_selecionado:
-    df = df[df['Período'].isin(periodo_selecionado)]
+    df_filtrado = df_filtrado[df_filtrado['Período'].isin(periodo_selecionado)]
 
-# Filtrar por turnos selecionados
-if turno_selecionado:
-    df = df[df['Turno'].isin(turno_selecionado)]
-
-# Calcular métricas por turno
-total_por_turno = df.groupby('Turno')['Matrícula'].nunique()
-media_por_turno = df.groupby(['Turno', 'Período'])['Matrícula'].nunique().groupby('Turno').mean()
-totgeral_por_turno = df.groupby('Turno').size()
-
-# Cards com métricas
-turnos = list(total_por_turno.index)
+# --- CÁLCULOS DAS MÉTRICAS ---
+turnos = sorted(df_filtrado['Turno'].dropna().unique().tolist())
 num_turnos = len(turnos)
 
-if aluno_selecionado == 'Todos':
-    # Primeira linha: Total de alunos por turno
-    st.subheader("Total de Alunos")
-    cols1 = st.columns(num_turnos)
-    for i, turno in enumerate(turnos):
-        with cols1[i]:
-            st.markdown(f"""
-<div style="background-color: #112333; padding: 15px; border: #000000; border-radius: 8px; text-align: center;">
-    <h5>{turno}</h5>
-    <h3>{total_por_turno[turno]}</h3>
-</div>
-""", unsafe_allow_html=True)
+if num_turnos == 0:
+    st.warning("Nenhum dado encontrado para os filtros selecionados.")
+    st.stop()
 
-    # Segunda linha: Média de matrículas por turno
-    st.subheader("Média de Matrículas")
-    cols2 = st.columns(num_turnos)
-    for i, turno in enumerate(turnos):
-        with cols2[i]:
-            st.markdown(f"""
-<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
-    <h5>{turno}</h5>
-    <h3>{media_por_turno[turno]:.0f}</h3>
-</div>
-""", unsafe_allow_html=True)
+# Cálculos agregados baseados no DF filtrado
+total_por_turno = df_filtrado.groupby('Turno')['Matrícula'].nunique()
+media_por_turno = df_filtrado.groupby(['Turno', 'Período'])['Matrícula'].nunique().groupby('Turno').mean()
+totgeral_por_turno = df_filtrado.groupby('Turno').size() # Contagem total de registros
+aprovados_por_turno = (df_filtrado.groupby('Turno')['AP'].sum() / df_filtrado.groupby('Turno')['Total'].sum() * 100).fillna(0)
 
-    # Terceira linha: Total Geral de Matrículas
-    st.subheader("Total Geral de Matrículas")
-    cols3 = st.columns(num_turnos)
-    for i, turno in enumerate(turnos):
-        with cols3[i]:
-            st.markdown(f"""
-<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
-    <h5>{turno}</h5>
-    <h3>{totgeral_por_turno[turno]}</h3>
-</div>
-""", unsafe_allow_html=True)
-else:
-    st.subheader(aluno_selecionado)
+# --- VISUALIZAÇÃO: CARDS ---
+st.markdown("<span id='metricas-gerais'></span>", unsafe_allow_html=True)
+
+# Se for um aluno específico, mostra um layout simplificado
+if aluno_selecionado != 'Todos':
+    st.subheader(f"Resumo: {aluno_selecionado}")
     cols = st.columns(num_turnos)
     for i, turno in enumerate(turnos):
         with cols[i]:
-            st.markdown(f"""
-<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
-    <h5>{turno}: {totgeral_por_turno[turno]} matrículas</h5>
-</div>
-""", unsafe_allow_html=True)
+            val = totgeral_por_turno.get(turno, 0)
+            st.markdown(exibir_card(f"Matrículas ({turno})", val), unsafe_allow_html=True)
+else:
+    # Layout completo para "Todos"
+    st.subheader("Total de Alunos")
+    cols1 = st.columns(num_turnos)
+    for i, turno in enumerate(turnos):
+        val = total_por_turno.get(turno, 0)
+        with cols1[i]:
+            st.markdown(exibir_card(turno, val), unsafe_allow_html=True)
 
-st.markdown("---")            
+    st.subheader("Média de Matrículas por Período")
+    cols2 = st.columns(num_turnos)
+    for i, turno in enumerate(turnos):
+        val = media_por_turno.get(turno, 0)
+        with cols2[i]:
+            st.markdown(exibir_card(turno, f"{val:.1f}"), unsafe_allow_html=True)
 
-print("aaa")
+    st.subheader("Total Geral de Matrículas (Soma de todos períodos)")
+    cols3 = st.columns(num_turnos)
+    for i, turno in enumerate(turnos):
+        val = totgeral_por_turno.get(turno, 0)
+        with cols3[i]:
+            st.markdown(exibir_card(turno, val), unsafe_allow_html=True)
 
-# Novos cards sugeridos
-st.subheader("Nível de Aprovação por Turno")
-aprovados_por_turno = (df.groupby('Turno')['AP'].sum() / df.groupby('Turno')['Total'].sum() * 100).fillna(0)
-cols_novos = st.columns(len(turnos))
-for i, turno in enumerate(turnos):
-    with cols_novos[i]:
-            st.markdown(f"""
-<div style="background-color: #112333; padding: 15px; border-radius: 8px; text-align: center;">
-    <h5>{turno}</h5>
-    <h3> {aprovados_por_turno.get(turno, 0):.1f}%</h3>
-</div>
-""", unsafe_allow_html=True)
-
-#st.metric(f"{turno}", f"{aprovados_por_turno.get(turno, 0):.1f}%")
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# Tabela de Top Alunos
-st.subheader("Melhores Alunos por Quantidade de Aprovações")
-
-df_top10 = df.groupby('Nome').agg({
-    'Ingresso': 'first',
-    'Turno': 'first',
-    'AP': 'sum',
-    'RP': 'sum',
-    'TR': 'sum',
-    'Total': 'sum'
-}).reset_index()
-df_top10['% Aprov'] = (df_top10['AP'] / df_top10['Total'] * 100).fillna(0).round(0)
-top_alunos = df_top10.nlargest(10, '% Aprov')[['Nome', 'Turno', 'AP', '% Aprov', 'Total']].reset_index(drop=True)
-top_alunos = top_alunos.sort_values(by=['% Aprov', 'Total'], ascending=[False, False])
-st.dataframe(top_alunos, hide_index=True)
-
-st.markdown("---")   
-
-# Group by 'Turno' and 'Período' and count unique 'Matrícula'
-enrollment_by_shift_period = df.groupby(['Turno', 'Período'])['Matrícula'].nunique().reset_index()
-
-# Convert 'Período' to datetime for proper sorting
-enrollment_by_shift_period['Período'] = pd.to_datetime(enrollment_by_shift_period['Período'])
-enrollment_by_shift_period = enrollment_by_shift_period.sort_values(by=['Período', 'Turno'])
-
-# Convert 'Período' to string in 'YYYY-MM' format for text axis
-enrollment_by_shift_period['Período'] = enrollment_by_shift_period['Período'].dt.strftime('%Y-%m')
-
-# Plotting the data with Plotly Express for stacked bars and hover functionality
-fig = px.bar(
-    enrollment_by_shift_period,
-    x='Período',
-    y='Matrícula',
-    color='Turno',  # Differentiate bars by 'Turno'
-    title='Matrículas por Turno e Período',
-    labels={'Matrícula': 'Matrículas', 'Período': 'Período'},
-    barmode='stack', # This ensures the bars are stacked
-    hover_data={'Período': True, 'Matrícula': True, 'Turno': True} # Custom hover data, 'Período' is already string
-)
-
-# Ensure x-axis is treated as category type (text)
-fig.update_xaxes(type='category')
-
-# Adjust general layout to control bar width and overall plot width
-# Setting bargap to a very small value and bargroupgap to 0 should make bars as wide as possible.
-# Increasing the 'width' of the plot to provide more space for bars.
-fig.update_layout(bargap=0.25, bargroupgap=0.0) # Adjusted bargap, bargroupgap, and added width
-
-st.plotly_chart(fig)
-
-# Novo gráfico: Evolução de Ingressantes por Período
-#st.subheader("Evolução de Ingressantes por Período")
-ingressantes_por_periodo = df[df['Ingressante'] == 1].groupby('Período')['Matrícula'].nunique().reset_index()
-ingressantes_por_periodo['Período'] = pd.to_datetime(ingressantes_por_periodo['Período'])
-ingressantes_por_periodo = ingressantes_por_periodo.sort_values('Período')
-ingressantes_por_periodo['Período'] = ingressantes_por_periodo['Período'].dt.strftime('%Y-%m')
-fig_line = px.area(ingressantes_por_periodo, x='Período', y='Matrícula', title='Evolução de Ingressantes por Período')
-fig_line.update_xaxes(type='category')
-st.plotly_chart(fig_line)
-
-# Novo gráfico: Distribuição de Alunos por Turno
-#st.subheader("Distribuição de Alunos por Turno")
-alunos_por_turno = df.groupby('Turno')['Matrícula'].nunique()
-fig_pie = px.pie(values=alunos_por_turno.values, names=alunos_por_turno.index, title='Distribuição de Alunos por Turno')
-st.plotly_chart(fig_pie)
-
-# Novo gráfico: Status Acadêmico por Turno (Barras Empilhadas)
-#st.subheader("Status Acadêmico por Período")
-status_df = df.groupby('Período')[['AP', 'RP', 'TR']].sum().reset_index()
-status_df['Período'] = pd.to_datetime(status_df['Período'])
-status_df = status_df.sort_values('Período')
-status_df['Período'] = status_df['Período'].dt.strftime('%Y-%m')
-status_melted = status_df.melt(id_vars='Período', value_vars=['AP', 'RP', 'TR'], var_name='Status', value_name='Count')
-fig_bar_status = px.bar(status_melted, x='Período', y='Count', color='Status', title='Status Acadêmico por Período', barmode='stack')
-fig_bar_status.update_xaxes(type='category')
-st.plotly_chart(fig_bar_status)
+    st.subheader("Nível de Aprovação (% Total)")
+    cols4 = st.columns(num_turnos)
+    for i, turno in enumerate(turnos):
+        val = aprovados_por_turno.get(turno, 0)
+        with cols4[i]:
+            st.markdown(exibir_card(turno, f"{val:.1f}", sufixo="%"), unsafe_allow_html=True)
 
 st.markdown("---")
 
-st.subheader("Relação de Alunos")
+# --- TABELA TOP ALUNOS ---
+st.markdown("<span id='tabela-aprovacoes'></span>", unsafe_allow_html=True)
+st.subheader("Melhores Alunos")
 
-df_compactado = df_top10.sort_values(by=['Nome', 'Ingresso'], ascending=[True, True])
-st.dataframe(df_compactado, hide_index=True)
+# Prepara dados para tabela
+df_agrupado = df_filtrado.groupby('Nome').agg({
+    'Ingresso': 'first',
+    'Turno': 'first',
+    'Total': 'sum',
+    'AP': 'sum',
+    'RP': 'sum',
+    'TR': 'sum'
+}).reset_index().rename(columns={
+    'AP': 'Aprov',
+    'RP': 'Reprov',
+    'TR': 'Tranc',
+    'Total': 'Matr'
+})
+
+df_agrupado['% Aprov'] = (df_agrupado['Aprov'] / df_agrupado['Matr'] * 100).fillna(0)
+
+# Ordenação e Seleção
+top_alunos = df_agrupado.sort_values(by=['% Aprov', 'Matr'], ascending=[False, False]).head(10)
+colunas_exibicao = ['Nome', 'Turno', 'Matr', 'Aprov', 'Reprov', '% Aprov']
+
+# Estilização da Tabela
+styler = top_alunos[colunas_exibicao].style.format({
+    'Matr': '{:.0f}',
+    'Aprov': '{:.0f}',
+    'Reprov': '{:.0f}',
+    '% Aprov': '{:.1f}%'
+})
+
+# Aplica cores (vermelho/verde)
+styler = styler.applymap(lambda v: cor_condicional(v, '#ffcccc'), subset=['Reprov'])
+styler = styler.applymap(lambda v: cor_condicional(v, '#ccffcc'), subset=['Aprov'])
+
+st.dataframe(styler, use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# --- GRÁFICOS ---
+st.markdown("<span id='graficos'></span>", unsafe_allow_html=True)
+st.subheader("Gráficos")
+
+# Gráfico 1: Matrículas por Turno e Período
+enrollment_by_shift = df_filtrado.groupby(['Turno', 'Período_str'])['Matrícula'].nunique().reset_index()
+enrollment_by_shift = enrollment_by_shift.sort_values('Período_str')
+
+fig = px.bar(
+    enrollment_by_shift,
+    x='Período_str',
+    y='Matrícula',
+    color='Turno',
+    title='Matrículas por Turno e Período',
+    labels={'Matrícula': 'Qtd Alunos', 'Período_str': 'Período'},
+    barmode='group' # Mudei para group para facilitar comparação, use 'stack' se preferir empilhado
+)
+fig.update_layout(xaxis_type='category') # Garante ordem correta do texto
+st.plotly_chart(fig, use_container_width=True)
+
+col_g1, col_g2 = st.columns(2)
+
+with col_g1:
+    # Gráfico 2: Evolução de Ingressantes
+    ingressantes = df_filtrado[df_filtrado['Ingressante'] == 1].groupby('Período_str')['Matrícula'].nunique().reset_index()
+    ingressantes = ingressantes.sort_values('Período_str')
+    
+    if not ingressantes.empty:
+        fig_line = px.area(ingressantes, x='Período_str', y='Matrícula', title='Evolução de Ingressantes')
+        fig_line.update_layout(xaxis_type='category')
+        st.plotly_chart(fig_line, use_container_width=True)
+    else:
+        st.info("Sem dados de ingressantes para o filtro atual.")
+
+with col_g2:
+    # Gráfico 3: Pizza
+    alunos_por_turno = df_filtrado.groupby('Turno')['Matrícula'].nunique()
+    if not alunos_por_turno.empty:
+        fig_pie = px.pie(values=alunos_por_turno.values, names=alunos_por_turno.index, title='Distribuição por Turno')
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+# Gráfico 4: Status Acadêmico
+status_df = df_filtrado.groupby('Período_str')[['AP', 'RP', 'TR']].sum().reset_index()
+status_df = status_df.sort_values('Período_str')
+status_melted = status_df.melt(id_vars='Período_str', value_vars=['AP', 'RP', 'TR'], var_name='Status', value_name='Quantidade')
+
+fig_bar_status = px.bar(
+    status_melted, 
+    x='Período_str', 
+    y='Quantidade', 
+    color='Status', 
+    title='Status Acadêmico Absoluto (Aprov/Reprov/Tranc)', 
+    barmode='stack',
+    color_discrete_map={'AP': '#2ca02c', 'RP': '#d62728', 'TR': '#ff7f0e'} # Cores padrão (Verde, Vermelho, Laranja)
+)
+fig_bar_status.update_layout(xaxis_type='category')
+st.plotly_chart(fig_bar_status, use_container_width=True)
+
+st.markdown("---")
+
+# --- RELAÇÃO GERAL ---
+st.markdown("<span id='relacao-geral'></span>", unsafe_allow_html=True)
+st.subheader("Relação Geral de Alunos")
+
+# Usa o dataframe agrupado já calculado anteriormente
+st.dataframe(df_agrupado.sort_values('Nome'), use_container_width=True, hide_index=True)
+
+# --- RODAPÉ E BOTÃO TOPO ---
+st.markdown("""
+    <div style="text-align: center; margin-top: 30px; margin-bottom: 20px;">
+        <a href='#topo' target="_self" style="text-decoration: none;">
+            <button style="
+                background-color: #f0f0f0; border: 1px solid black; border-radius: 8px; 
+                padding: 10px 20px; cursor: pointer; font-weight: bold; color: black;
+                box-shadow: 2px 2px 5px rgba(0,0,0,0.2);">
+                ⬆ Voltar ao Topo
+            </button>
+        </a>
+    </div>
+""", unsafe_allow_html=True)
+
+ano_atual = datetime.now().year
+data_hoje = datetime.now().strftime("%d/%m/%Y")
+
+st.markdown(f"""
+<div style="text-align: center; padding-top: 20px; border-top: 1px solid #ccc; font-size: 14px; color: #666;">
+    <p>© {ano_atual} Ciências da Natureza - UFPI<br>
+    <span style="font-size: 12px;">Dados atualizados em: {data_hoje}</span></p>
+</div>
+""", unsafe_allow_html=True)
